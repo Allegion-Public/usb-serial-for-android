@@ -22,12 +22,18 @@
 package com.hoho.android.usbserial.examples;
 
 import android.app.Activity;
+import android.app.PendingIntent;
+import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
+import android.content.IntentFilter;
+import android.hardware.usb.UsbDevice;
 import android.hardware.usb.UsbDeviceConnection;
 import android.hardware.usb.UsbManager;
 import android.os.Bundle;
 import android.util.Log;
+import android.view.View;
+import android.widget.Button;
 import android.widget.CheckBox;
 import android.widget.CompoundButton;
 import android.widget.ScrollView;
@@ -35,7 +41,8 @@ import android.widget.TextView;
 
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.util.HexDump;
-import com.hoho.android.usbserial.util.SerialInputOutputManager;
+import com.hoho.android.usbserial.util.SerialReadManager;
+import com.hoho.android.usbserial.util.SerialWriteManager;
 
 import java.io.IOException;
 import java.util.concurrent.ExecutorService;
@@ -66,29 +73,49 @@ public class SerialConsoleActivity extends Activity {
     private TextView mTitleTextView;
     private TextView mDumpTextView;
     private ScrollView mScrollView;
-    private CheckBox chkDTR;
-    private CheckBox chkRTS;
 
-    private final ExecutorService mExecutor = Executors.newSingleThreadExecutor();
+    private final ExecutorService mExecutor = Executors.newFixedThreadPool(2);
 
-    private SerialInputOutputManager mSerialIoManager;
+    private SerialWriteManager mWriteManager;
 
-    private final SerialInputOutputManager.Listener mListener =
-            new SerialInputOutputManager.Listener() {
+    private SerialReadManager mReadManager;
+    private final SerialReadManager.Listener mListener =
+            new SerialReadManager.Listener() {
 
-        @Override
-        public void onRunError(Exception e) {
-            Log.d(TAG, "Runner stopped.");
-        }
-
-        @Override
-        public void onNewData(final byte[] data) {
-            SerialConsoleActivity.this.runOnUiThread(new Runnable() {
                 @Override
-                public void run() {
-                    SerialConsoleActivity.this.updateReceivedData(data);
+                public void onRunError(Exception e) {
+                    Log.d(TAG, "Runner stopped.");
                 }
-            });
+
+                @Override
+                public void onNewData(final byte[] data) {
+                    SerialConsoleActivity.this.runOnUiThread(new Runnable() {
+                        @Override
+                        public void run() {
+                            SerialConsoleActivity.this.updateReceivedData(data);
+                        }
+                    });
+                }
+            };
+
+    private static PendingIntent mPermissionIntent;
+    private static final String ACTION_USB_PERMISSION = "com.android.example.USB_PERMISSION";
+    private final BroadcastReceiver mUsbReceiver = new BroadcastReceiver() {
+        public void onReceive(Context context, Intent intent) {
+            String action = intent.getAction();
+            if ("com.android.example.USB_PERMISSION".equals(action)) {
+                synchronized(this) {
+                    UsbDevice device = (UsbDevice)intent.getParcelableExtra("device");
+                    if (intent.getBooleanExtra("permission", false)) {
+                        if (device != null) {
+                            Log.v("RP_", "permission granted for device " + device);
+                        }
+                    } else {
+                        Log.v("RP_", "permission denied for device " + device);
+                    }
+                }
+            }
+
         }
     };
 
@@ -99,24 +126,14 @@ public class SerialConsoleActivity extends Activity {
         mTitleTextView = (TextView) findViewById(R.id.demoTitle);
         mDumpTextView = (TextView) findViewById(R.id.consoleText);
         mScrollView = (ScrollView) findViewById(R.id.demoScroller);
-        chkDTR = (CheckBox) findViewById(R.id.checkBoxDTR);
-        chkRTS = (CheckBox) findViewById(R.id.checkBoxRTS);
+        Button getTime = (Button) findViewById(R.id.getTimeButton);
 
-        chkDTR.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
+        getTime.setOnClickListener(new View.OnClickListener() {
             @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                try {
-                    sPort.setDTR(isChecked);
-                }catch (IOException x){}
-            }
-        });
+            public void onClick(View v) {
 
-        chkRTS.setOnCheckedChangeListener(new CompoundButton.OnCheckedChangeListener() {
-            @Override
-            public void onCheckedChanged(CompoundButton buttonView, boolean isChecked) {
-                try {
-                    sPort.setRTS(isChecked);
-                }catch (IOException x){}
+                byte[] command = {(byte)0xff, (byte)0x55, (byte)0xAA, (byte)0xCC};
+                mWriteManager.writeAsync(command);
             }
         });
 
@@ -146,13 +163,25 @@ public class SerialConsoleActivity extends Activity {
     @Override
     protected void onResume() {
         super.onResume();
-        Log.d(TAG, "Resumed, port=" + sPort);
+        UsbDeviceConnection connection = null;
+        UsbDevice usbDevice;
+        Log.d("POOJA - "+TAG, "Resumed, port=" + sPort);
         if (sPort == null) {
             mTitleTextView.setText("No serial device.");
         } else {
             final UsbManager usbManager = (UsbManager) getSystemService(Context.USB_SERVICE);
-
-            UsbDeviceConnection connection = usbManager.openDevice(sPort.getDriver().getDevice());
+            usbDevice = sPort.getDriver().getDevice();
+            Log.d("POOJA - "+TAG, "Resumed, driver=" + sPort.getDriver());
+            Log.d("POOJA - "+TAG, "Resumed, device=" + sPort.getDriver().getDevice());
+            if (!usbManager.hasPermission(usbDevice)) {
+                mPermissionIntent = PendingIntent.getBroadcast(this.getApplicationContext(), 0, new Intent("com.android.example.USB_PERMISSION"), 0);
+                IntentFilter filter = new IntentFilter("com.android.example.USB_PERMISSION");
+                this.getApplicationContext().registerReceiver(this.mUsbReceiver, filter);
+                usbManager.requestPermission(usbDevice, mPermissionIntent);
+                connection = usbManager.openDevice(usbDevice);
+            } else {
+                connection = usbManager.openDevice(usbDevice);
+            }
             if (connection == null) {
                 mTitleTextView.setText("Opening device failed");
                 return;
@@ -160,8 +189,14 @@ public class SerialConsoleActivity extends Activity {
 
             try {
                 sPort.open(connection);
-                sPort.setParameters(115200, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+                sPort.setParameters(57600, 8, UsbSerialPort.STOPBITS_1, UsbSerialPort.PARITY_NONE);
+                try {
+                    sPort.setDTR(true);
+                    sPort.setRTS(true);
 
+                } catch (IOException e) {
+                    e.printStackTrace();
+                }
                 showStatus(mDumpTextView, "CD  - Carrier Detect", sPort.getCD());
                 showStatus(mDumpTextView, "CTS - Clear To Send", sPort.getCTS());
                 showStatus(mDumpTextView, "DSR - Data Set Ready", sPort.getDSR());
@@ -187,18 +222,26 @@ public class SerialConsoleActivity extends Activity {
     }
 
     private void stopIoManager() {
-        if (mSerialIoManager != null) {
+        if (mWriteManager != null) {
             Log.i(TAG, "Stopping io manager ..");
-            mSerialIoManager.stop();
-            mSerialIoManager = null;
+            mWriteManager.stop();
+            mWriteManager = null;
+        }
+
+        if (mReadManager != null) {
+            Log.i(TAG, "Stopping io manager ..");
+            mReadManager.stop();
+            mReadManager = null;
         }
     }
 
     private void startIoManager() {
         if (sPort != null) {
             Log.i(TAG, "Starting io manager ..");
-            mSerialIoManager = new SerialInputOutputManager(sPort, mListener);
-            mExecutor.submit(mSerialIoManager);
+            mWriteManager = new SerialWriteManager(sPort);
+            mReadManager = new SerialReadManager(sPort, mListener);
+            mExecutor.submit(mWriteManager);
+            mExecutor.submit(mReadManager);
         }
     }
 
@@ -218,7 +261,7 @@ public class SerialConsoleActivity extends Activity {
      * Starts the activity, using the supplied driver instance.
      *
      * @param context
-     * @param driver
+     * @param port
      */
     static void show(Context context, UsbSerialPort port) {
         sPort = port;

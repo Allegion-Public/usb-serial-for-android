@@ -35,12 +35,12 @@ import java.nio.ByteBuffer;
  *
  * @author mike wakerly (opensource@hoho.com)
  */
-public class SerialInputOutputManager implements Runnable {
+public class SerialReadManager implements Runnable {
 
-    private static final String TAG = SerialInputOutputManager.class.getSimpleName();
+    private static final String TAG = "POOJA - " + SerialReadManager.class.getSimpleName();
     private static final boolean DEBUG = true;
 
-    private static final int READ_WAIT_MILLIS = 200;
+    private static final int READ_WAIT_MILLIS = 1000;
     private static final int BUFSIZ = 4096;
 
     private final UsbSerialPort mDriver;
@@ -69,7 +69,7 @@ public class SerialInputOutputManager implements Runnable {
         public void onNewData(byte[] data);
 
         /**
-         * Called when {@link SerialInputOutputManager#run()} aborts due to an
+         * Called when {@link SerialWriteManager#run()} aborts due to an
          * error.
          */
         public void onRunError(Exception e);
@@ -78,14 +78,14 @@ public class SerialInputOutputManager implements Runnable {
     /**
      * Creates a new instance with no listener.
      */
-    public SerialInputOutputManager(UsbSerialPort driver) {
+    public SerialReadManager(UsbSerialPort driver) {
         this(driver, null);
     }
 
     /**
      * Creates a new instance with the provided listener.
      */
-    public SerialInputOutputManager(UsbSerialPort driver, Listener listener) {
+    public SerialReadManager(UsbSerialPort driver, Listener listener) {
         mDriver = driver;
         mListener = listener;
     }
@@ -96,12 +96,6 @@ public class SerialInputOutputManager implements Runnable {
 
     public synchronized Listener getListener() {
         return mListener;
-    }
-
-    public void writeAsync(byte[] data) {
-        synchronized (mWriteBuffer) {
-            mWriteBuffer.put(data);
-        }
     }
 
     public synchronized void stop() {
@@ -118,7 +112,7 @@ public class SerialInputOutputManager implements Runnable {
     /**
      * Continuously services the read and write buffers until {@link #stop()} is
      * called, or until a driver exception is raised.
-     *
+     * <p>
      * NOTE(mikey): Uses inefficient read/write-with-timeout.
      * TODO(mikey): Read asynchronously with {@link UsbRequest#queue(ByteBuffer, int)}
      */
@@ -144,7 +138,7 @@ public class SerialInputOutputManager implements Runnable {
             Log.w(TAG, "Run ending due to exception: " + e.getMessage(), e);
             final Listener listener = getListener();
             if (listener != null) {
-              listener.onRunError(e);
+                listener.onRunError(e);
             }
         } finally {
             synchronized (this) {
@@ -155,6 +149,8 @@ public class SerialInputOutputManager implements Runnable {
     }
 
     private void step() throws IOException {
+        Log.d(TAG, "step()");
+
         // Handle incoming data.
         int len = mDriver.read(mReadBuffer.array(), READ_WAIT_MILLIS);
         if (len > 0) {
@@ -168,23 +164,5 @@ public class SerialInputOutputManager implements Runnable {
             mReadBuffer.clear();
         }
 
-        // Handle outgoing data.
-        byte[] outBuff = null;
-        synchronized (mWriteBuffer) {
-            len = mWriteBuffer.position();
-            if (len > 0) {
-                outBuff = new byte[len];
-                mWriteBuffer.rewind();
-                mWriteBuffer.get(outBuff, 0, len);
-                mWriteBuffer.clear();
-            }
-        }
-        if (outBuff != null) {
-            if (DEBUG) {
-                Log.d(TAG, "Writing data len=" + len);
-            }
-            mDriver.write(outBuff, READ_WAIT_MILLIS);
-        }
     }
-
 }

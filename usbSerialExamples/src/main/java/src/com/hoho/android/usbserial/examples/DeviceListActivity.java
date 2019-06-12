@@ -41,6 +41,8 @@ import android.widget.ProgressBar;
 import android.widget.TextView;
 import android.widget.TwoLineListItem;
 
+import com.hoho.android.usbserial.driver.CdcAcmSerialDriver;
+import com.hoho.android.usbserial.driver.ProbeTable;
 import com.hoho.android.usbserial.driver.UsbSerialDriver;
 import com.hoho.android.usbserial.driver.UsbSerialPort;
 import com.hoho.android.usbserial.driver.UsbSerialProber;
@@ -162,8 +164,11 @@ public class DeviceListActivity extends Activity {
                 Log.d(TAG, "Refreshing device list ...");
                 SystemClock.sleep(1000);
 
-                final List<UsbSerialDriver> drivers =
-                        UsbSerialProber.getDefaultProber().findAllDrivers(mUsbManager);
+
+                ProbeTable customTable = new ProbeTable();
+                customTable.addProduct(0x1FC9, 0x0094, CdcAcmSerialDriver.class);
+                UsbSerialProber prober = new UsbSerialProber(customTable);
+                final List<UsbSerialDriver> drivers = prober.findAllDrivers(mUsbManager);
 
                 final List<UsbSerialPort> result = new ArrayList<UsbSerialPort>();
                 for (final UsbSerialDriver driver : drivers) {
@@ -200,7 +205,7 @@ public class DeviceListActivity extends Activity {
     }
 
     private void showConsoleActivity(UsbSerialPort port) {
-        SerialConsoleActivity.show(this, port);
+        com.hoho.android.usbserial.examples.SerialConsoleActivity.show(this, port);
     }
 
 }
