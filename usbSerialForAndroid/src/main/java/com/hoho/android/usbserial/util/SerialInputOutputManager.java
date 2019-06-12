@@ -37,10 +37,10 @@ import java.nio.ByteBuffer;
  */
 public class SerialInputOutputManager implements Runnable {
 
-    private static final String TAG = SerialInputOutputManager.class.getSimpleName();
+    private static final String TAG = "POOJA - " + SerialInputOutputManager.class.getSimpleName();
     private static final boolean DEBUG = true;
 
-    private static final int READ_WAIT_MILLIS = 200;
+    private static final int READ_WAIT_MILLIS = 1000;
     private static final int BUFSIZ = 4096;
 
     private final UsbSerialPort mDriver;
@@ -97,9 +97,9 @@ public class SerialInputOutputManager implements Runnable {
     public synchronized Listener getListener() {
         return mListener;
     }
-
     public void writeAsync(byte[] data) {
         synchronized (mWriteBuffer) {
+            Log.i(TAG, "Write Async()");
             mWriteBuffer.put(data);
         }
     }
@@ -118,7 +118,7 @@ public class SerialInputOutputManager implements Runnable {
     /**
      * Continuously services the read and write buffers until {@link #stop()} is
      * called, or until a driver exception is raised.
-     *
+     * <p>
      * NOTE(mikey): Uses inefficient read/write-with-timeout.
      * TODO(mikey): Read asynchronously with {@link UsbRequest#queue(ByteBuffer, int)}
      */
@@ -144,7 +144,7 @@ public class SerialInputOutputManager implements Runnable {
             Log.w(TAG, "Run ending due to exception: " + e.getMessage(), e);
             final Listener listener = getListener();
             if (listener != null) {
-              listener.onRunError(e);
+                listener.onRunError(e);
             }
         } finally {
             synchronized (this) {
@@ -155,6 +155,7 @@ public class SerialInputOutputManager implements Runnable {
     }
 
     private void step() throws IOException {
+        Log.d(TAG, "step()");
         // Handle incoming data.
         int len = mDriver.read(mReadBuffer.array(), READ_WAIT_MILLIS);
         if (len > 0) {
@@ -184,7 +185,7 @@ public class SerialInputOutputManager implements Runnable {
                 Log.d(TAG, "Writing data len=" + len);
             }
             mDriver.write(outBuff, READ_WAIT_MILLIS);
+
         }
     }
-
 }
